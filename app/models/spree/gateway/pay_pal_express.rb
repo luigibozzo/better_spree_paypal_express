@@ -12,6 +12,11 @@ module Spree
     attr_accessible :preferred_login, :preferred_password, :preferred_signature,
                     :preferred_solution, :preferred_logourl, :preferred_landing_page
 
+    def can_be_displayed_on_cart_page
+      true
+    end
+
+
     def supports?(source)
       true
     end

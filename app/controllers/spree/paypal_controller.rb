@@ -1,6 +1,7 @@
 module Spree
   class PaypalController < StoreController
     def express
+      puts "hello"
       items = current_order.line_items.map do |item|
         {
           :Name => item.product.name,

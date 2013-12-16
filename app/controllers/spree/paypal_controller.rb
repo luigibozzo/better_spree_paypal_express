@@ -1,6 +1,12 @@
 module Spree
   class PaypalController < StoreController
     def express
+      puts "CURRENT ORDER STATE ", current_order.state
+      if (current_order.state == "cart")
+        current_order.skip_to_confirmation = true
+        current_order.save!
+        puts "SAVED CURRENT ORDER "
+      end
       items = current_order.line_items.map do |item|
         {
           :Name => item.product.name,

@@ -8,14 +8,18 @@ module Spree
     preference :solution, :string, default: 'Mark'
     preference :landing_page, :string, default: 'Billing'
     preference :logourl, :string, default: ''
+    preference :confirmation, :boolean, default: false
 
     attr_accessible :preferred_login, :preferred_password, :preferred_signature,
-                    :preferred_solution, :preferred_logourl, :preferred_landing_page
+                    :preferred_solution, :preferred_logourl, :preferred_landing_page, :preferred_confirmation
 
     def can_be_displayed_on_cart_page
       true
     end
 
+    def payment_profiles_supported?
+      preferred_confirmation
+    end
 
     def supports?(source)
       true

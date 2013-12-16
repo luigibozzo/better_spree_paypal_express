@@ -124,7 +124,7 @@ module Spree
             :currencyID => current_order.currency,
             :value => current_order.tax_total
           },
-          :ShipToAddress => address_options,
+          :ShipToAddress => current_order.bill_address.present? ? address_options : nil,
           :PaymentDetailsItem => items,
           :ShippingMethod => "Shipping Method Name Goes Here",
           :PaymentAction => "Sale"

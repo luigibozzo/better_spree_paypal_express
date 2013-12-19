@@ -1,11 +1,9 @@
 module Spree
   class PaypalController < StoreController
     def express
-      puts "CURRENT ORDER STATE ", current_order.state
       if (current_order.state == "cart")
         current_order.skip_to_confirmation = true
         current_order.save!
-        puts "SAVED CURRENT ORDER "
       end
       items = current_order.line_items.map do |item|
         {
@@ -47,11 +45,10 @@ module Spree
           :ReturnURL => confirm_paypal_url(:payment_method_id => params[:payment_method_id], :utm_nooverride => 1),
           :CancelURL =>  cancel_paypal_url,
           :SolutionType => payment_method.preferred_solution.present? ? payment_method.preferred_solution : "Mark",
-          :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Billing",
+          :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
           :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
           :PaymentDetails => [payment_details(items)]
         }})
-
       begin
         pp_response = provider.set_express_checkout(pp_request)
         if pp_response.success?
@@ -67,7 +64,36 @@ module Spree
     end
 
     def confirm
+      #require 'pry'; binding.pry
+
       order = current_order
+
+
+      unless order.ship_address.present?
+        pp_details_request = provider.build_get_express_checkout_details({:Token => params[:token]})
+        pp_details_response = provider.get_express_checkout_details(pp_details_request)
+        details_response = pp_details_response.get_express_checkout_details_response_details
+        shippingAddress = details_response.PaymentDetails[0].ShipToAddress
+
+        address = Spree::Address.create
+        address.firstname = shippingAddress.Name.split(" ").first
+        address.lastname = shippingAddress.Name.split(" ").second
+        if address.has_attribute(:title)
+          address.title = "Mr"
+        end
+        address.address1 = shippingAddress.Street1
+        address.address2 = shippingAddress.Street2
+        address.city = shippingAddress.CityName
+        address.phone = details_response.ContactPhone
+        #_address.state = shippingAddress.StateOrProvince
+        address.country = Spree::Country.find_by_iso_name(shippingAddress.country)
+        address.zipcode = shippingAddress.PostalCode
+        address.save
+        order.ship_address = address
+        order.bill_address = address
+        order.save
+      end
+
       order.payments.create!({
         :source => Spree::PaypalExpressCheckout.create({
           :token => params[:token],

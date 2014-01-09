@@ -78,7 +78,8 @@ module Spree
         address = Spree::Address.create
         address.firstname = shippingAddress.Name.split(" ").first
         address.lastname = shippingAddress.Name.split(" ").second
-        if address.has_attribute(:title)
+        #TODO remove title validtion from ecom so that we can get rid of this
+        if address.has_attribute?(:title)
           address.title = "Mr"
         end
         address.address1 = shippingAddress.Street1
@@ -86,14 +87,12 @@ module Spree
         address.city = shippingAddress.CityName
         address.phone = details_response.ContactPhone
         #_address.state = shippingAddress.StateOrProvince
-        address.country = Spree::Country.find_by_iso_name(shippingAddress.country)
+        address.country = Spree::Country.find_by_iso(shippingAddress.country)
         address.zipcode = shippingAddress.PostalCode
         address.save
         order.ship_address = address
-        order.bill_address = address
-        order.save
+        order.save!
       end
-
       order.payments.create!({
         :source => Spree::PaypalExpressCheckout.create({
           :token => params[:token],
@@ -102,6 +101,7 @@ module Spree
         :amount => order.total,
         :payment_method => payment_method
       }, :without_protection => true)
+
       order.next
       if order.complete?
         flash.notice = Spree.t(:order_processed_successfully)

@@ -37,9 +37,11 @@ require 'spree/testing_support/url_helpers'
 require 'spree_paypal_express/factories'
 
 RSpec.configure do |config|
+  config.include Devise::TestHelpers, :type => :controller
   config.include FactoryGirl::Syntax::Methods
   config.include Spree::TestingSupport::UrlHelpers
   config.include Spree::TestingSupport::AuthorizationHelpers::Controller
+  config.include Spree::TestingSupport::ControllerRequests
 
   config.mock_with :rspec
   config.color = true

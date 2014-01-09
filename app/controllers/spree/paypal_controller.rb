@@ -78,10 +78,6 @@ module Spree
         address = Spree::Address.create
         address.firstname = shippingAddress.Name.split(" ").first
         address.lastname = shippingAddress.Name.split(" ").second
-        #TODO remove title validtion from ecom so that we can get rid of this
-        if address.has_attribute?(:title)
-          address.title = "Mr"
-        end
         address.address1 = shippingAddress.Street1
         address.address2 = shippingAddress.Street2
         address.city = shippingAddress.CityName

@@ -24,6 +24,9 @@ describe Spree::PaypalController do
               :country => 'GB',
               :PostalCode => 'TR4 0TH'
           }}],
+          :PayerInfo => {
+            :Payer => "a@b.com"
+          },
           :ContactPhone => '1234567'
                                                     })
 
@@ -32,6 +35,7 @@ describe Spree::PaypalController do
       payment_method.stub(:provider).and_return(fake_pay_pal_provider)
       spree_get :confirm
 
+      expect(order.email).to eq("a@b.com")
       order.ship_address.should_not be_nil
       expect(order.ship_address.firstname).to eq("John")
       expect(order.ship_address.lastname).to eq("Smith")

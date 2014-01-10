@@ -69,11 +69,16 @@ module Spree
 
       order = current_order
 
+      pp_details_request = provider.build_get_express_checkout_details({:Token => params[:token]})
+      pp_details_response = provider.get_express_checkout_details(pp_details_request)
+      details_response = pp_details_response.get_express_checkout_details_response_details
+
+      unless order.email.present?
+        order.email = details_response.PayerInfo.Payer
+        order.save!
+      end
 
       unless order.ship_address.present?
-        pp_details_request = provider.build_get_express_checkout_details({:Token => params[:token]})
-        pp_details_response = provider.get_express_checkout_details(pp_details_request)
-        details_response = pp_details_response.get_express_checkout_details_response_details
         shippingAddress = details_response.PaymentDetails[0].ShipToAddress
 
         address = Spree::Address.create

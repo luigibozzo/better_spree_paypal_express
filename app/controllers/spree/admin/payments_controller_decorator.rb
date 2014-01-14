@@ -1,4 +1,5 @@
 Spree::Admin::PaymentsController.class_eval do
+  skip_before_filter :can_transition_to_payment, :if => lambda {|controller| controller.send(:load_order).payments.any?{|payment| payment.source_type == "Spree::PaypalExpressCheckout"}}
   def paypal_refund
     if request.get?
       if @payment.source.state == 'refunded'

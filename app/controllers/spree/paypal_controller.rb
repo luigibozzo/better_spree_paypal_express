@@ -1,6 +1,7 @@
 module Spree
   class PaypalController < StoreController
     def express
+      fromPaymentPage = current_order.state == "payment"
       items = current_order.line_items.map do |item|
         {
             :Name => item.product.name,
@@ -43,7 +44,7 @@ module Spree
                                                                :SolutionType => payment_method.preferred_solution.present? ? payment_method.preferred_solution : "Mark",
                                                                :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
                                                                :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
-                                                               :NoShipping => current_order.ship_address.present? ? 1 : 0,
+                                                               :NoShipping => fromPaymentPage ? 1 : 0,
                                                                :PaymentDetails => [payment_details(items)]
                                                            }})
       begin
@@ -61,10 +62,7 @@ module Spree
     end
 
     def confirm
-      if (current_order.state == "cart")
-        current_order.skip_to_confirmation = true
-        current_order.save!
-      end
+      fromPaymentPage = current_order.state == "payment"
 
       order = current_order
 
@@ -72,14 +70,11 @@ module Spree
       pp_details_response = provider.get_express_checkout_details(pp_details_request)
       details_response = pp_details_response.get_express_checkout_details_response_details
 
-      unless order.email.present?
-        order.email = details_response.PayerInfo.Payer
-        order.save!
-      end
 
-      unless order.ship_address.present?
+      if !fromPaymentPage
+        order.skip_to_confirmation = true
+
         shippingAddress = details_response.PaymentDetails[0].ShipToAddress
-
         address = Spree::Address.create
         address.firstname = shippingAddress.Name.split(" ").first
         address.lastname = shippingAddress.Name.split(" ").second
@@ -92,6 +87,9 @@ module Spree
         address.zipcode = shippingAddress.PostalCode
         address.save
         order.ship_address = address
+
+        order.email = details_response.PayerInfo.Payer
+
         order.save!
       end
 
@@ -110,7 +108,7 @@ module Spree
       if order.complete?
         flash.notice = Spree.t(:order_processed_successfully)
         flash[:commerce_tracking] = "nothing special"
-        redirect_to edit_order_path(order, :token => order.token)
+        redirect_to order_path(order, :token => order.token)
       else
         redirect_to checkout_state_path(order.state)
       end
@@ -118,8 +116,8 @@ module Spree
 
     def cancel
       flash[:notice] = "Don't want to use PayPal? No problems."
-      if current_order.state == "cart"
-        redirect_to  cart_path
+      if current_order.state != "payment"
+        redirect_to cart_path
       else
         redirect_to checkout_state_path(current_order.state)
       end
@@ -165,7 +163,7 @@ module Spree
                 :currencyID => current_order.currency,
                 :value => current_order.tax_total
             },
-            :ShipToAddress => current_order.bill_address.present? ? address_options : nil,
+            :ShipToAddress => current_order.ship_address.present? ? address_options : nil,
             :PaymentDetailsItem => items,
             :ShippingMethod => "Shipping Method Name Goes Here",
             :PaymentAction => "Sale"
@@ -175,14 +173,14 @@ module Spree
 
     def address_options
       {
-          :Name => current_order.bill_address.try(:full_name),
-          :Street1 => current_order.bill_address.address1,
-          :Street2 => current_order.bill_address.address2,
-          :CityName => current_order.bill_address.city,
+          :Name => current_order.ship_address.try(:full_name),
+          :Street1 => current_order.ship_address.address1,
+          :Street2 => current_order.ship_address.address2,
+          :CityName => current_order.ship_address.city,
           # :phone => current_order.bill_address.phone,
-          :StateOrProvince => current_order.bill_address.state_text,
-          :Country => current_order.bill_address.country.iso,
-          :PostalCode => current_order.bill_address.zipcode
+          :StateOrProvince => current_order.ship_address.state_text,
+          :Country => current_order.ship_address.country.iso,
+          :PostalCode => current_order.ship_address.zipcode
       }
     end
   end

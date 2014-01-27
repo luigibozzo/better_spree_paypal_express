@@ -45,7 +45,23 @@ module Spree
                                                                :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
                                                                :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
                                                                :NoShipping => fromPaymentPage ? 1 : 0,
-                                                               :PaymentDetails => [payment_details(items)]
+                                                               :PaymentDetails => [payment_details(items)],
+                                                               :FlatRateShippingOptions => [{
+                                                                                                :ShippingOptionIsDefault => true,
+                                                                                                :ShippingOptionAmount => {
+                                                                                                    :currencyID => current_order.currency,
+                                                                                                    :value => 0
+                                                                                                },
+                                                                                                :ShippingOptionName => "SHIPPING ERROR"
+                                                                                            }
+                                                               ],
+                                                               :CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}",
+                                                               #:CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback",
+                                                               :MaxAmount => {
+                                                                   :currencyID => current_order.currency,
+                                                                   :value => current_order.total + 200
+                                                               },
+                                                               :CallbackTimeout => 6
                                                            }})
       begin
         pp_response = provider.set_express_checkout(pp_request)
@@ -75,20 +91,13 @@ module Spree
         order.skip_to_confirmation = true
 
         shippingAddress = details_response.PaymentDetails[0].ShipToAddress
-        address = Spree::Address.create
-        address.firstname = shippingAddress.Name.split(" ").first
-        address.lastname = shippingAddress.Name.split(" ").second
-        address.address1 = shippingAddress.Street1
-        address.address2 = shippingAddress.Street2
-        address.city = shippingAddress.CityName
-        address.phone = details_response.ContactPhone
-        #_address.state = shippingAddress.StateOrProvince
-        address.country = Spree::Country.find_by_iso(shippingAddress.country)
-        address.zipcode = shippingAddress.PostalCode
+        address = create_shipping_address(details_response, shippingAddress)
         address.save
         order.ship_address = address
 
         order.email = details_response.PayerInfo.Payer
+
+        set_shipping_rate order, details_response.UserSelectedOptions.ShippingOptionName
 
         order.save!
       end
@@ -124,7 +133,80 @@ module Spree
 
     end
 
+    def callback
+      #Jeantine/Mark 23 Jan 14 - This will only work if all items can be sent by the same shipping method
+      #Currently it is expected there will be only one shipping method.
+      # If an order contains items that cannot be sent by the same shipping method paypal will still allow the user to select either shipping method
+      country = Spree::Country.find_by_iso(params['SHIPTOCOUNTRY'])
+
+      ship_address = Spree::Address.new(
+          :address1 =>params['SHIPTOSTREET'],
+          :address2=>params['SHIPTOSTREET2'],
+          :city=>params['SHIPTOCITY'],
+          :zipcode=>params['SHIPTOZIP'],
+          :country=>country)
+      #we are not going to save the address here as we don't have enough information to satisfy spree
+      session[:order_id] = params['order_id']
+      order = current_order
+      order.ship_address = ship_address
+      order.create_proposed_shipments
+
+      if !order.shipments.present?
+        return build_callback_response "NO_SHIPPING_OPTION_DETAILS" => 1
+      end
+
+      callback_response = {'CURRENCYCODE' => params['CURRENCYCODE']}
+
+      shipping_rates = get_shipping_rates order
+      shipping_rates.each_with_index { |shipping_rate, index| callback_response.merge!(create_shipping_rate_response shipping_rate, index) }
+      callback_response['L_SHIPPINGOPTIONISDEFAULT0'] = true
+
+      build_callback_response  callback_response
+    end
+
+    def build_callback_response(callback_response)
+      formatted_response = format_nvp_response "&METHOD=CallbackResponse", callback_response
+      render :text => formatted_response
+    end
+
+    def format_nvp_response method, response_hash
+      response_hash.inject(method) { |string, pair| string + '&' +  pair[0].to_s + '=' + pair[1].to_s  }
+    end
+
+    def get_shipping_rates order
+      order.shipments.flat_map { |shipment| shipment.shipping_rates}
+    end
+
+    def create_shipping_rate_response shipping_rate, index
+      index = index.to_s
+      {"L_SHIPPINGOPTIONNAME" + index => "", #Internal name. but shown in PayPal UI
+       "L_SHIPPINGOPTIONLABEL" + index => shipping_rate.shipping_method.name,
+       "L_SHIPPINGOPTIONAMOUNT" + index => shipping_rate.cost.to_s,
+       "L_SHIPPINGOPTIONISDEFAULT" + index => false
+      }
+    end
+
     private
+
+    def set_shipping_rate order, selectedShippingName
+      shipping_rates = get_shipping_rates order
+      selected_shipping = shipping_rates.select { |shipping_rate| selectedShippingName.eql? shipping_rate.shipping_method.name }.first
+      order.shipment.selected_shipping_rate_id= selected_shipping.id
+    end
+
+    def create_shipping_address(details_response, shippingAddress)
+      address = Spree::Address.create
+      address.firstname = shippingAddress.Name.split(" ").first
+      address.lastname = shippingAddress.Name.split(" ").second
+      address.address1 = shippingAddress.Street1
+      address.address2 = shippingAddress.Street2
+      address.city = shippingAddress.CityName
+      address.phone = details_response.ContactPhone
+      #_address.state = shippingAddress.StateOrProvince
+      address.country = Spree::Country.find_by_iso(shippingAddress.country)
+      address.zipcode = shippingAddress.PostalCode
+      address
+    end
 
     def payment_method
       Spree::PaymentMethod.find(params[:payment_method_id])
@@ -149,7 +231,7 @@ module Spree
         {
             :OrderTotal => {
                 :currencyID => current_order.currency,
-                :value => current_order.total
+                :value => current_order.total + 0
             },
             :ItemTotal => {
                 :currencyID => current_order.currency,
@@ -157,7 +239,7 @@ module Spree
             },
             :ShippingTotal => {
                 :currencyID => current_order.currency,
-                :value => current_order.ship_total
+                :value => 0
             },
             :TaxTotal => {
                 :currencyID => current_order.currency,

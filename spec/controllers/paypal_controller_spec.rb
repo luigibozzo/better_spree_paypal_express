@@ -9,19 +9,15 @@ describe Spree::PaypalController do
     @controller.stub(:current_order).and_return(@order)
   end
 
-
-  describe 'updating order with information from paypal' do
-
-    @payment_method
-    @checkout_details_response
+  describe 'When PayPal calls the confirm action' do
 
     before(:each) do
       Spree::Country.stub(:find_by_iso).and_return( Spree::Country.new)
 
-      @payment_method = Spree::Gateway::PayPalExpress.new
-      @controller.stub(:payment_method).and_return(@payment_method)
+      payment_method = Spree::Gateway::PayPalExpress.new
+      @controller.stub(:payment_method).and_return(payment_method)
 
-      @checkout_details_response =  Hashie::Mash.new({:PaymentDetails => [{
+      checkout_details_response =  Hashie::Mash.new({:PaymentDetails => [{
                                                                               :ShipToAddress => {
                                                                                   :Name => 'John Smith',
                                                                                   :Street1 => 'A House',
@@ -35,13 +31,14 @@ describe Spree::PaypalController do
                                                       },
                                                       :ContactPhone => '1234567',
                                                       :UserSelectedOptions => {
-                                                          :ShippingOptionName => "Shipping Option 2"
+                                                          :ShippingOptionName => "Shipping Option 2",
+                                                          :ShippingCalculationMode => "Callback"
                                                       }
                                                      })
 
       fake_pay_pal_provider = FakePayPalProvider.new
-      fake_pay_pal_provider.set_checkout_response(@checkout_details_response)
-      @payment_method.stub(:provider).and_return(fake_pay_pal_provider)
+      fake_pay_pal_provider.set_checkout_response(checkout_details_response)
+      payment_method.stub(:provider).and_return(fake_pay_pal_provider)
     end
 
     it 'should update order with shipping address information' do
@@ -72,6 +69,46 @@ describe Spree::PaypalController do
 
       spree_get :confirm
     end
+
+    describe 'and the shipping method is Fallback' do
+
+      before(:each) do
+        Spree::Country.stub(:find_by_iso).and_return( Spree::Country.new)
+
+        payment_method = Spree::Gateway::PayPalExpress.new
+        @controller.stub(:payment_method).and_return(payment_method)
+
+        checkout_details_response =  Hashie::Mash.new({:PaymentDetails => [{
+                                                                               :ShipToAddress => {
+                                                                                   :Name => 'John Smith',
+                                                                                   :Street1 => 'A House',
+                                                                                   :Street2 => 'A Street',
+                                                                                   :CityName => 'A City',
+                                                                                   :country => 'GB',
+                                                                                   :PostalCode => 'TR4 0TH'
+                                                                               }}],
+                                                       :PayerInfo => {
+                                                           :Payer => "a@b.com"
+                                                       },
+                                                       :ContactPhone => '1234567',
+                                                       :UserSelectedOptions => {
+                                                           :ShippingOptionName => "Shipping Option 2",
+                                                           :ShippingCalculationMode => "Fallback"
+                                                       }
+                                                      })
+
+        fake_pay_pal_provider = FakePayPalProvider.new
+        fake_pay_pal_provider.set_checkout_response(checkout_details_response)
+        payment_method.stub(:provider).and_return(fake_pay_pal_provider)
+      end
+
+      it 'should cancel the transaction' do
+        spree_get :confirm
+        response.should redirect_to :action => :cancel
+      end
+
+    end
+
   end
 
   describe 'Cancelling paypal express payment' do
@@ -132,6 +169,7 @@ describe Spree::PaypalController do
                           '&L_SHIPPINGOPTIONLABEL1=Drone'\
                           '&L_SHIPPINGOPTIONAMOUNT1=3.0'\
                           '&L_SHIPPINGOPTIONISDEFAULT1=false'
+
       expect(response.body).to eq(callbackResponse)
 
     end

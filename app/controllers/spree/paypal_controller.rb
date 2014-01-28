@@ -37,32 +37,40 @@ module Spree
       items.reject! do |item|
         item[:Amount][:value].zero?
       end
-      pp_request = provider.build_set_express_checkout({
-                                                           :SetExpressCheckoutRequestDetails => {
-                                                               :ReturnURL => confirm_paypal_url(:payment_method_id => params[:payment_method_id], :utm_nooverride => 1),
-                                                               :CancelURL => cancel_paypal_url,
-                                                               :SolutionType => payment_method.preferred_solution.present? ? payment_method.preferred_solution : "Mark",
-                                                               :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
-                                                               :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
-                                                               :NoShipping => fromPaymentPage ? 1 : 0,
-                                                               :PaymentDetails => [payment_details(items)],
-                                                               :FlatRateShippingOptions => [{
-                                                                                                :ShippingOptionIsDefault => true,
-                                                                                                :ShippingOptionAmount => {
-                                                                                                    :currencyID => current_order.currency,
-                                                                                                    :value => 0
-                                                                                                },
-                                                                                                :ShippingOptionName => "SHIPPING ERROR"
-                                                                                            }
-                                                               ],
-                                                               :CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}",
-                                                               #:CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback",
-                                                               :MaxAmount => {
-                                                                   :currencyID => current_order.currency,
-                                                                   :value => current_order.total + 200
-                                                               },
-                                                               :CallbackTimeout => 6
-                                                           }})
+
+      paypal_parameters = {
+              :ReturnURL => confirm_paypal_url(:payment_method_id => params[:payment_method_id], :utm_nooverride => 1),
+              :CancelURL => cancel_paypal_url,
+              :SolutionType => payment_method.preferred_solution.present? ? payment_method.preferred_solution : "Mark",
+              :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
+              :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
+              :NoShipping => fromPaymentPage ? 1 : 0,
+              :PaymentDetails => [payment_details(items)],
+              :MaxAmount => {
+                  :currencyID => current_order.currency,
+                  :value => current_order.total + 200
+              },
+              :CallbackTimeout => 6
+          }
+
+      if (!fromPaymentPage)
+        callback_parameters = {
+            :FlatRateShippingOptions => [{
+                                             :ShippingOptionIsDefault => true,
+                                             :ShippingOptionAmount => {
+                                                 :currencyID => current_order.currency,
+                                                 :value => 0
+                                             },
+                                             :ShippingOptionName => "SHIPPING ERROR"
+                                         }
+            ],
+            :CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
+            #:CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback"
+        }
+        paypal_parameters.merge!(callback_parameters)
+      end
+
+      pp_request = provider.build_set_express_checkout({:SetExpressCheckoutRequestDetails => paypal_parameters})
       begin
         pp_response = provider.set_express_checkout(pp_request)
         if pp_response.success?
@@ -78,6 +86,7 @@ module Spree
     end
 
     def confirm
+
       fromPaymentPage = current_order.state == "payment"
 
       order = current_order
@@ -86,8 +95,16 @@ module Spree
       pp_details_response = provider.get_express_checkout_details(pp_details_request)
       details_response = pp_details_response.get_express_checkout_details_response_details
 
+      shippingFromCallback = details_response.UserSelectedOptions.ShippingCalculationMode == "Callback"
+
 
       if !fromPaymentPage
+
+        if !shippingFromCallback
+          redirect_to :action => :cancel, :notice => "There was a problem with PayPal. You have not been charged. Please try again" and return
+          #redirect_to url_for(:controller => :PaypalController, :action => :cancel ) and return
+        end
+
         order.skip_to_confirmation = true
 
         shippingAddress = details_response.PaymentDetails[0].ShipToAddress
@@ -124,7 +141,10 @@ module Spree
     end
 
     def cancel
-      flash[:notice] = "Don't want to use PayPal? No problems."
+
+      notice = params[:notice] || "Don't want to use PayPal? No problems."
+
+      flash[:notice] = notice
       if current_order.state != "payment"
         redirect_to cart_path
       else
@@ -231,7 +251,7 @@ module Spree
         {
             :OrderTotal => {
                 :currencyID => current_order.currency,
-                :value => current_order.total + 0
+                :value => current_order.total
             },
             :ItemTotal => {
                 :currencyID => current_order.currency,
@@ -239,7 +259,7 @@ module Spree
             },
             :ShippingTotal => {
                 :currencyID => current_order.currency,
-                :value => 0
+                :value => current_order.ship_total
             },
             :TaxTotal => {
                 :currencyID => current_order.currency,

@@ -1,80 +1,33 @@
 module Spree
   class PaypalController < StoreController
-    def express
-      fromPaymentPage = current_order.state == "payment"
-      items = current_order.line_items.map do |item|
-        {
-            :Name => item.product.name,
-            :Number => item.variant.sku,
-            :Quantity => item.quantity,
-            :Amount => {
-                :currencyID => current_order.currency,
-                :value => item.price
-            },
-            :ItemCategory => "Physical"
-        }
-      end
 
+    SHIPPING_OPTION_NAME = 'L_SHIPPINGOPTIONNAME'
+    SHIPPING_OPTION_LABEL = "L_SHIPPINGOPTIONLABEL"
+    SHIPPING_OPTION_AMOUNT = "L_SHIPPINGOPTIONAMOUNT"
+    SHIPPING_OPTION_DEFAULT = "L_SHIPPINGOPTIONISDEFAULT"
+    NO_SHIPPING_OPTION_DETAILS = "NO_SHIPPING_OPTION_DETAILS"
+    CURRENCY_CODE = 'CURRENCYCODE'
+
+    def express
       tax_adjustments = current_order.adjustments.tax
       shipping_adjustments = current_order.adjustments.shipping
 
-      current_order.adjustments.eligible.each do |adjustment|
-        next if (tax_adjustments + shipping_adjustments).include?(adjustment)
-        items << {
-            :Name => adjustment.label,
-            :Quantity => 1,
-            :Amount => {
-                :currencyID => current_order.currency,
-                :value => adjustment.amount
-            }
-        }
-      end
+      items = build_paypal_payment_details_items current_order
+      add_item_adjustments items, shipping_adjustments, tax_adjustments
 
       # Because PayPal doesn't accept $0 items at all.
-      # See #10
-      # https://cms.paypal.com/uk/cgi-bin/?cmd=_render-content&content_ID=developer/e_howto_api_ECCustomizing
-      # "It can be a positive or negative value but not zero."
       items.reject! do |item|
         item[:Amount][:value].zero?
       end
 
-      paypal_parameters = {
-              :ReturnURL => confirm_paypal_url(:payment_method_id => params[:payment_method_id], :utm_nooverride => 1),
-              :CancelURL => cancel_paypal_url,
-              :SolutionType => payment_method.preferred_solution.present? ? payment_method.preferred_solution : "Mark",
-              :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
-              :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
-              :NoShipping => fromPaymentPage ? 1 : 0,
-              :PaymentDetails => [payment_details(items)],
-              :MaxAmount => {
-                  :currencyID => current_order.currency,
-                  :value => current_order.total + 200
-              },
-              :CallbackTimeout => 6
-          }
+      paypal_parameters = build_paypal_request_parameters(items)
 
-      if (!fromPaymentPage)
-        callback_parameters = {
-            :FlatRateShippingOptions => [{
-                                             :ShippingOptionIsDefault => true,
-                                             :ShippingOptionAmount => {
-                                                 :currencyID => current_order.currency,
-                                                 :value => 0
-                                             },
-                                             :ShippingOptionName => "SHIPPING ERROR"
-                                         }
-            ],
-            :CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
-            #:CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback"
-        }
-        paypal_parameters.merge!(callback_parameters)
-      end
+      pp_request = provider.build_set_express_checkout(paypal_parameters)
 
-      pp_request = provider.build_set_express_checkout({:SetExpressCheckoutRequestDetails => paypal_parameters})
       begin
         pp_response = provider.set_express_checkout(pp_request)
         if pp_response.success?
-          redirect_to provider.express_checkout_url(pp_response, :useraction => 'commit')
+          redirect_to provider.express_checkout_url(pp_response)
         else
           flash[:error] = "PayPal failed. #{pp_response.errors.map(&:long_message).join(" ")}"
           redirect_to checkout_state_path(:payment)
@@ -118,7 +71,6 @@ module Spree
         order.save!
       end
 
-
       order.payments.create!({
                                  :source => Spree::PaypalExpressCheckout.create({
                                                                                     :token => params[:token],
@@ -127,7 +79,6 @@ module Spree
                                  :amount => order.total,
                                  :payment_method => payment_method
                              }, :without_protection => true)
-
 
       order.next
       if order.complete?
@@ -140,7 +91,6 @@ module Spree
     end
 
     def cancel
-
       notice = params[:notice] || "Don't want to use PayPal? No problems."
 
       flash[:notice] = notice
@@ -171,17 +121,19 @@ module Spree
       order.create_proposed_shipments
 
       if !order.shipments.present?
-        return build_callback_response "NO_SHIPPING_OPTION_DETAILS" => 1
+        return build_callback_response NO_SHIPPING_OPTION_DETAILS => 1
       end
 
-      callback_response = {'CURRENCYCODE' => params['CURRENCYCODE']}
+      callback_response = {CURRENCY_CODE => params['CURRENCYCODE']}
 
       shipping_rates = get_shipping_rates order
       shipping_rates.each_with_index { |shipping_rate, index| callback_response.merge!(create_shipping_rate_response shipping_rate, index) }
-      callback_response['L_SHIPPINGOPTIONISDEFAULT0'] = true
+      callback_response[SHIPPING_OPTION_DEFAULT + '0'] = true
 
       build_callback_response  callback_response
     end
+
+    private
 
     def build_callback_response(callback_response)
       formatted_response = format_nvp_response "&METHOD=CallbackResponse", callback_response
@@ -198,14 +150,79 @@ module Spree
 
     def create_shipping_rate_response shipping_rate, index
       index = index.to_s
-      {"L_SHIPPINGOPTIONNAME" + index => "", #Internal name. but shown in PayPal UI
-       "L_SHIPPINGOPTIONLABEL" + index => shipping_rate.shipping_method.name,
-       "L_SHIPPINGOPTIONAMOUNT" + index => shipping_rate.cost.to_s,
-       "L_SHIPPINGOPTIONISDEFAULT" + index => false
+      {SHIPPING_OPTION_NAME + index => "", #Internal name. but shown in PayPal UI
+       SHIPPING_OPTION_LABEL + index => shipping_rate.shipping_method.name,
+       SHIPPING_OPTION_AMOUNT + index => shipping_rate.cost.to_s,
+       SHIPPING_OPTION_DEFAULT + index => false
       }
     end
 
-    private
+    def build_paypal_payment_details_items current_order
+      items = current_order.line_items.map do |item|
+        {
+            :Name => item.product.name,
+            :Number => item.variant.sku,
+            :Quantity => item.quantity,
+            :Amount => {
+                :currencyID => current_order.currency,
+                :value => item.price
+            },
+            :ItemCategory => "Physical"
+        }
+      end
+    end
+
+    def add_item_adjustments(items, shipping_adjustments, tax_adjustments)
+      current_order.adjustments.eligible.each do |adjustment|
+        next if (tax_adjustments + shipping_adjustments).include?(adjustment)
+        items << {
+            :Name => adjustment.label,
+            :Quantity => 1,
+            :Amount => {
+                :currencyID => current_order.currency,
+                :value => adjustment.amount
+            }
+        }
+      end
+    end
+
+    def build_paypal_request_parameters(items)
+      fromPaymentPage = current_order.state == "payment"
+
+      paypal_parameters = {
+          :ReturnURL => confirm_paypal_url(:payment_method_id => params[:payment_method_id], :utm_nooverride => 1),
+          :CancelURL => cancel_paypal_url,
+          :SolutionType => payment_method.preferred_solution.present? ? payment_method.preferred_solution : "Mark",
+          :LandingPage => payment_method.preferred_landing_page.present? ? payment_method.preferred_landing_page : "Login",
+          :cppheaderimage => payment_method.preferred_logourl.present? ? payment_method.preferred_logourl : "",
+          :NoShipping => fromPaymentPage ? 1 : 0,
+          :PaymentDetails => [payment_details(items)],
+          :MaxAmount => {
+              :currencyID => current_order.currency,
+              :value => current_order.total + 200
+          },
+          :CallbackTimeout => 6
+      }
+
+      if (!fromPaymentPage)
+        callback_parameters = {
+            :FlatRateShippingOptions => [{
+                                             :ShippingOptionIsDefault => true,
+                                             :ShippingOptionAmount => {
+                                                 :currencyID => current_order.currency,
+                                                 :value => 0
+                                             },
+                                             :ShippingOptionName => "SHIPPING ERROR"
+                                         }
+            ],
+            #:CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
+            :CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback?order_id=#{current_order.id}"
+        }
+        paypal_parameters.merge!(callback_parameters)
+      end
+
+      {:SetExpressCheckoutRequestDetails => paypal_parameters}
+    end
 
     def set_shipping_rate order, selectedShippingName
       shipping_rates = get_shipping_rates order

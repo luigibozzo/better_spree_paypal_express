@@ -16,7 +16,8 @@ class FakePayPalProvider
     @pp_details_response.get_express_checkout_details_response_details = response
   end
 
-
-
+  def build_set_express_checkout _args
+    nil
+  end
 
 end

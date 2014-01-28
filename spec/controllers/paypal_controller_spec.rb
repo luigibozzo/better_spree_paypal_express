@@ -9,6 +9,54 @@ describe Spree::PaypalController do
     @controller.stub(:current_order).and_return(@order)
   end
 
+  describe 'When we call PayPal Express Checkout' do
+
+    @fake_pay_pal_provider
+
+    before(:each) do
+      Spree::Country.stub(:find_by_iso).and_return( Spree::Country.new)
+
+      payment_method = Spree::Gateway::PayPalExpress.new
+      @controller.stub(:payment_method).and_return(payment_method)
+
+      @fake_pay_pal_provider = FakePayPalProvider.new
+      payment_method.stub(:provider).and_return(@fake_pay_pal_provider)
+
+      @controller.stub(:redirect_to)
+      @fake_pay_pal_provider.stub(:set_express_checkout).and_return(Hashie::Mash.new({:success? => true}))
+      @fake_pay_pal_provider.stub(:express_checkout_url)
+    end
+
+    describe "and we have not come from the payments page" do
+
+      before do
+        @order.state = "not payment"
+      end
+
+      it 'should have parameters for Callback' do
+        @fake_pay_pal_provider.should_receive(:build_set_express_checkout).with({:SetExpressCheckoutRequestDetails => hash_including(:CallbackURL)})
+
+        @controller.express
+      end
+
+    end
+
+    describe "and we have come from the payments page" do
+
+      before do
+        @order.state = "payment"
+      end
+
+      it 'should not have parameters for Callback' do
+        @fake_pay_pal_provider.should_receive(:build_set_express_checkout).with({:SetExpressCheckoutRequestDetails => hash_excluding(:CallbackURL)})
+
+        @controller.express
+      end
+
+    end
+
+  end
+
   describe 'When PayPal calls the confirm action' do
 
     before(:each) do
@@ -104,14 +152,15 @@ describe Spree::PaypalController do
 
       it 'should cancel the transaction' do
         spree_get :confirm
-        response.should redirect_to :action => :cancel
+
+        response.should redirect_to :action => :cancel, :notice => "There was a problem with PayPal. You have not been charged. Please try again"
       end
 
     end
 
   end
 
-  describe 'Cancelling paypal express payment' do
+  describe 'When cancelling PayPal express payment' do
     it 'should redirect to cart page when cancelling from super express checkout' do
       @order.state = 'cart'
       spree_get :cancel
@@ -175,6 +224,5 @@ describe Spree::PaypalController do
     end
 
   end
-
 
 end

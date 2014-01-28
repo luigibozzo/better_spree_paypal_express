@@ -102,7 +102,6 @@ module Spree
 
         if !shippingFromCallback
           redirect_to :action => :cancel, :notice => "There was a problem with PayPal. You have not been charged. Please try again" and return
-          #redirect_to url_for(:controller => :PaypalController, :action => :cancel ) and return
         end
 
         order.skip_to_confirmation = true

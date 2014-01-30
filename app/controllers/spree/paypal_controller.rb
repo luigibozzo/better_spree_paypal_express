@@ -219,8 +219,8 @@ module Spree
                                              :ShippingOptionName => "NO SHIPPING AVAILABLE"
                                          }
             ],
-            :CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
-            #:CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback?order_id=#{current_order.id}"
+            #:CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
+            :CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback?order_id=#{current_order.id}"
         }
         paypal_parameters.merge!(callback_parameters)
       end

@@ -181,16 +181,16 @@ describe Spree::PaypalController do
       request_from_paypal = {"SHIPTOCOUNTRY" => "blah"}
 
       spree_post :callback, request_from_paypal
-      expect(response.body).to eq('&METHOD=CallbackResponse&NO_SHIPPING_OPTION_DETAILS=1')
+      expect(response.body).to eq('&METHOD=CallbackResponse&CALLBACKVERSION=61.0&NO_SHIPPING_OPTION_DETAILS=1')
     end
 
     it 'should respond with no shipping option when there are no shipping methods for that product in that country' do
       Spree::Country.stub(:find_by_iso).and_return(Spree::Country.new)
       request_from_paypal = {"SHIPTOCOUNTRY" => "GB"}
-      @order.stub(:create_proposed_shipments).and_return([])
-      @order.stub(:shipments).and_return([])
+      @order.stub(:create_proposed_shipments)
+      @order.stub(:shipments).and_return([Spree::Shipment.new])
       spree_post :callback, request_from_paypal
-      expect(response.body).to eq('&METHOD=CallbackResponse&NO_SHIPPING_OPTION_DETAILS=1')
+      expect(response.body).to eq('&METHOD=CallbackResponse&CALLBACKVERSION=61.0&NO_SHIPPING_OPTION_DETAILS=1')
     end
 
     it 'should respond with the proper shipping options for express checkout given request from Paypal' do
@@ -209,6 +209,7 @@ describe Spree::PaypalController do
       spree_post :callback, request_from_paypal
 
       callbackResponse =  '&METHOD=CallbackResponse'\
+                          '&CALLBACKVERSION=61.0'\
                           '&CURRENCYCODE=GBP'\
                           '&L_SHIPPINGOPTIONNAME0='\
                           '&L_SHIPPINGOPTIONLABEL0=Rocket'\

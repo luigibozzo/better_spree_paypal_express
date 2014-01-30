@@ -50,17 +50,16 @@ module Spree
 
       if !fromPaymentPage
 
-        shippingAddress = details_response.PaymentDetails[0].ShipToAddress
-        countryIsValid = Spree::Country.find_by_iso(shippingAddress.country).present?
 
         shippingFromCallback = details_response.UserSelectedOptions.ShippingCalculationMode == "Callback"
 
-        if !shippingFromCallback || !countryIsValid
+        if !shippingFromCallback
           redirect_to :action => :cancel, :error => "There was a problem with PayPal. You have not been charged. Please try again" and return
         end
 
         order.skip_to_confirmation = true
 
+        shippingAddress = details_response.PaymentDetails[0].ShipToAddress
         address = create_shipping_address(details_response, shippingAddress)
         address.save!
         order.ship_address = address
@@ -124,13 +123,13 @@ module Spree
       order.ship_address = ship_address
       order.create_proposed_shipments
 
-      if !order.shipments.present?
+      shipping_rates = get_shipping_rates order
+
+      if !shipping_rates.present?
         return build_callback_response NO_SHIPPING_OPTION_DETAILS => 1
       end
 
       callback_response = {CURRENCY_CODE => params['CURRENCYCODE']}
-
-      shipping_rates = get_shipping_rates order
       shipping_rates.each_with_index { |shipping_rate, index| callback_response.merge!(create_shipping_rate_response shipping_rate, index) }
       callback_response[SHIPPING_OPTION_DEFAULT + '0'] = true
 
@@ -140,7 +139,7 @@ module Spree
     private
 
     def build_callback_response(callback_response)
-      formatted_response = format_nvp_response "&METHOD=CallbackResponse", callback_response
+      formatted_response = format_nvp_response "&METHOD=CallbackResponse&CALLBACKVERSION=61.0", callback_response
       render :text => formatted_response
     end
 

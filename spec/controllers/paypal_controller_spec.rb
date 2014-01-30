@@ -153,7 +153,7 @@ describe Spree::PaypalController do
       it 'should cancel the transaction' do
         spree_get :confirm
 
-        response.should redirect_to :action => :cancel, :notice => "There was a problem with PayPal. You have not been charged. Please try again"
+        response.should redirect_to :action => :cancel, :error => "There was a problem with PayPal. You have not been charged. Please try again"
       end
 
     end

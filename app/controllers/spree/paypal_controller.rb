@@ -48,20 +48,21 @@ module Spree
       pp_details_response = provider.get_express_checkout_details(pp_details_request)
       details_response = pp_details_response.get_express_checkout_details_response_details
 
-      shippingFromCallback = details_response.UserSelectedOptions.ShippingCalculationMode == "Callback"
-
-
       if !fromPaymentPage
 
-        if !shippingFromCallback
-          redirect_to :action => :cancel, :notice => "There was a problem with PayPal. You have not been charged. Please try again" and return
+        shippingAddress = details_response.PaymentDetails[0].ShipToAddress
+        countryIsValid = Spree::Country.find_by_iso(shippingAddress.country).present?
+
+        shippingFromCallback = details_response.UserSelectedOptions.ShippingCalculationMode == "Callback"
+
+        if !shippingFromCallback || !countryIsValid
+          redirect_to :action => :cancel, :error => "There was a problem with PayPal. You have not been charged. Please try again" and return
         end
 
         order.skip_to_confirmation = true
 
-        shippingAddress = details_response.PaymentDetails[0].ShipToAddress
         address = create_shipping_address(details_response, shippingAddress)
-        address.save
+        address.save!
         order.ship_address = address
 
         order.email = details_response.PayerInfo.Payer
@@ -91,9 +92,12 @@ module Spree
     end
 
     def cancel
-      notice = params[:notice] || "Don't want to use PayPal? No problems."
 
-      flash[:notice] = notice
+      noticeType = (params[:error].present?) ? :error : :notice
+
+      notice = params[:error] || "Don't want to use PayPal? No problems."
+
+      flash[noticeType] = notice
       if current_order.state != "payment"
         redirect_to cart_path
       else
@@ -212,11 +216,11 @@ module Spree
                                                  :currencyID => current_order.currency,
                                                  :value => 0
                                              },
-                                             :ShippingOptionName => "SHIPPING ERROR"
+                                             :ShippingOptionName => "NO SHIPPING AVAILABLE"
                                          }
             ],
-            #:CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
-            :CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback?order_id=#{current_order.id}"
+            :CallbackURL => "http://french.qa.deco-columbus.com/testpaypal?order_id=#{current_order.id}"
+            #:CallbackURL => "http://#{request.host_with_port}/#{I18n.locale}/store/paypal/callback?order_id=#{current_order.id}"
         }
         paypal_parameters.merge!(callback_parameters)
       end
